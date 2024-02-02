@@ -1,35 +1,51 @@
 pub mod builtin;
+pub mod icons;
+pub mod status;
+pub mod utils;
 
-use std::{error::Error, io, io::Write};
+use status::StatusCode;
+use utils::read_line;
+use utils::split_line;
 
-fn read_line() -> Result<String, Box<dyn Error>> {
-    let mut buffer = String::new();
-    io::stdin().read_line(&mut buffer)?;
+use nix::{
+    sys::wait::waitpid,
+    unistd::{fork, ForkResult},
+};
+use std::{env, error::Error, fs, io::Write};
 
-    Ok(buffer)
-}
-
-fn split_line(line: String) -> Vec<String> {
-    line.split_whitespace().map(|s| s.to_string()).collect()
-}
-
-fn launch(args: Vec<String>) -> Result<bool, Box<dyn Error>> {
-    if !args.get(0).is_some() {
-        panic!("No command given");
+fn launch(args: Vec<String>) -> StatusCode {
+    let paths = env::var("PATH");
+    if paths.is_err() {
+        return StatusCode::Error;
+    }
+    for dir in paths.unwrap().split(':') {
+        let full_path = format!("{}/{}", dir, args[0]);
+        if fs::metadata(&full_path).is_ok() {
+            match unsafe { fork() } {
+                Ok(ForkResult::Parent { child }) => {
+                    if waitpid(child, None).is_err() {
+                        println!("Error waiting process");
+                        return StatusCode::Error;
+                    }
+                }
+                Ok(ForkResult::Child) => {
+                    return utils::exec(full_path, args);
+                }
+                Err(_) => {
+                    println!("Error forking process");
+                    return StatusCode::Error;
+                }
+            }
+            return StatusCode::Ok;
+        }
     }
 
-    let mut child = std::process::Command::new(&args[0])
-        .args(&args[1..])
-        .spawn()?;
-
-    child.wait()?;
-
-    Ok(true)
+    StatusCode::Error
 }
 
-fn execute(args: Vec<String>) -> Result<bool, Box<dyn Error>> {
+fn execute(args: Vec<String>) -> StatusCode {
     if args.get(0).is_none() {
-        return Ok(false);
+        return StatusCode::Usage;
     }
 
     match args[0].as_str() {
@@ -40,28 +56,22 @@ fn execute(args: Vec<String>) -> Result<bool, Box<dyn Error>> {
     }
 }
 
-fn wish_loop() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     let mut line: String;
     let mut args: Vec<String>;
-    let mut status: bool;
+    let mut status = StatusCode::Ok;
+    let mut prompt: String;
 
-    while {
-        print!("> ");
+    loop {
+        prompt = match status {
+            StatusCode::Ok => format!(" {} ", icons::PROMPT),
+            StatusCode::Error => format!(" {} ", icons::ERROR),
+            StatusCode::Usage => format!(" {} ", icons::WARNING),
+        };
+        print!("{prompt:} ");
         std::io::stdout().flush()?;
         line = read_line()?;
         args = split_line(line);
-        status = execute(args)?;
-
-        status
-    } {}
-
-    Ok(())
-}
-
-fn main() -> Result<(), Box<dyn Error>> {
-    // let mut args: Vec<String> = env::args().collect();
-
-    wish_loop()?;
-
-    Ok(())
+        status = execute(args);
+    }
 }
