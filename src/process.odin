@@ -43,12 +43,12 @@ Wait_Option :: enum {
 	__WCLONE    = 31,
 }
 
-Wait_Options :: bit_set[Wait_Option;i32]
+Wait_Options :: bit_set[Wait_Option;u32]
 
 @(default_calling_convention = "c")
 foreign libc {
-	@(link_name = "execvp")
-	_unix_execvp :: proc(path: cstring, argv: [^]cstring) -> int ---
+	@(link_name = "execve")
+	_unix_execve :: proc(path: cstring, argv: [^]cstring, envp: [^]cstring) -> int ---
 	@(link_name = "fork")
 	_unix_fork :: proc() -> pid_t ---
 	@(link_name = "waitpid")
@@ -73,7 +73,7 @@ exec :: proc(path: string, args: []string) -> os.Errno {
 		args_cstrs[i + 1] = strings.clone_to_cstring(args[i], context.temp_allocator)
 	}
 
-	_unix_execvp(path_cstr, raw_data(args_cstrs))
+	_unix_execve(path_cstr, raw_data(args_cstrs), {})
 	return os.Errno(os.get_last_error())
 }
 
@@ -81,3 +81,4 @@ waitpid :: proc "contextless" (pid: Pid, status: ^u32, options: Wait_Options) ->
 	ret := _unix_waitpid(cast(i32)pid, status, transmute(u32)options)
 	return Pid(ret), os.Errno(os.get_last_error())
 }
+

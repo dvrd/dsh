@@ -2,6 +2,7 @@ package wish
 
 import "core:fmt"
 import "core:os"
+import "core:path/filepath"
 import "core:strings"
 
 StatusCode :: enum {
@@ -13,32 +14,59 @@ StatusCode :: enum {
 launch :: proc(args: []string) -> StatusCode {
 	wpid: Pid
 	status: u32
+	cmd_path := strings.builder_make()
+
+	env_path := os.get_env("PATH")
+	dirs := strings.split(env_path, ":")
+
+	if len(dirs) == 0 {
+		fmt.eprintln(ERROR, "missing $PATH environment variable")
+		return .Error
+	}
+
+	base: for dir in dirs {
+		fd, err := os.open(dir)
+		defer os.close(fd)
+
+		if err != os.ERROR_NONE {
+      continue
+		}
+
+		fis: []os.File_Info
+		defer os.file_info_slice_delete(fis)
+
+		fis, _ = os.read_dir(fd, -1)
+
+		for fi in fis {
+			_, filename := filepath.split(fi.fullpath)
+			if filename == args[0] {
+				fmt.sbprint(&cmd_path, fi.fullpath)
+				break base
+			}
+		}
+	}
+
+	if strings.builder_len(cmd_path) == 0 {
+		fmt.eprintln(WARNING, "command not found:", args[0])
+		return .Error
+	}
 
 	pid, err := fork();if err != os.ERROR_NONE {
-		fmt.eprintln(ERROR, "ERROR: forking process")
-		os.exit(1)
+		fmt.eprintln(ERROR, "fork:", ERROR_MSG[err])
+		return .Error
 	}
 
 	if (pid == 0) {
-		err = exec(args[0], args[1:]);if err != os.ERROR_NONE {
-			fmt.eprintln(ERROR, "execvp failed", err)
-			os.exit(1)
+		err = exec(strings.to_string(cmd_path), args[1:]);if err != os.ERROR_NONE {
+			fmt.eprintln(WARNING, "execve:", ERROR_MSG[err])
+			return .Error
 		}
 		os.exit(0)
-	} else {
-		for {
-			wpid, err = waitpid(pid, &status, {Wait_Option.WUNTRACED});if err != os.ERROR_NONE {
-				fmt.eprintln(ERROR, "ERROR: no child process found to wait for")
-				os.exit(1)
-			}
-
-			if WIFEXITED(status) || WIFSIGNALED(status) {
-				break
-			}
-		}
 	}
 
-	return .Ok
+	wpid, _ = waitpid(pid, &status, {Wait_Option.WUNTRACED})
+
+	return wpid == pid && WIFEXITED(status) ? .Ok : .Error
 }
 
 execute :: proc(args: []string) -> StatusCode {
@@ -63,20 +91,21 @@ main :: proc() {
 	cmd: string
 	args: []string
 	status := StatusCode.Ok
+	cwd := os.get_current_directory()
+	stdout := os.stream_from_handle(os.stdout)
 
 	for {
 		switch status {
 		case .Ok:
-			fmt.print(" ", PROMPT, " ")
+			fmt.wprint(stdout, BLUE, cwd, "\n", PROMPT, " ")
 		case .Error:
-			fmt.print(" ", ERROR, " ")
+			fmt.wprint(stdout, "", ERROR, " ")
 		case .Usage:
-			fmt.print(" ", WARNING, " ")
+			fmt.wprint(stdout, "", WARNING, " ")
 		}
 
-		n, err := os.read(os.stdin, buf[:])
-		if err < 0 {
-			fmt.eprintln("Error reading from stdin")
+		n, err := os.read(os.stdin, buf[:]);if err < 0 {
+			fmt.eprintln(ERROR, "os.read: ", ERROR_MSG[err])
 			os.exit(1)
 		}
 
