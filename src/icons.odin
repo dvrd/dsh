@@ -1,8 +1,5 @@
 package wish
 
-BLUE :: "\x1B[34m"
-RESET :: "\x1B[0m"
-
 AWS :: "  "
 BUF :: " "
 C :: " "
@@ -83,8 +80,9 @@ SCALA :: " "
 SWIFT :: " "
 ZIG :: " "
 
-SUCCESS :: "\x1B[32m\x1b[0m"
-ERROR :: "\x1B[31m\x1b[0m"
-WARNING :: "\x1B[33m\x1b[0m"
-
-PROMPT :: "\x1B[32m󰘧\x1b[0m"
+LAMBDA :: "󰘧 "
+CHECK :: " "
+XCROSS :: " "
+ALERT :: " "
+CHEVRON_RIGHT :: "❯"
+ARROW_RIGHT :: "➜"

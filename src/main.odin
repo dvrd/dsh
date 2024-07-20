@@ -1,117 +1,91 @@
 package wish
 
+import "cmd"
 import "core:fmt"
+import "core:log"
+import "core:mem"
 import "core:os"
-import "core:path/filepath"
+import "core:slice"
 import "core:strings"
 
 StatusCode :: enum {
 	Ok,
 	Error,
 	Usage,
+	Exit,
 }
 
-launch :: proc(args: []string) -> StatusCode {
-	wpid: Pid
-	status: u32
-	cmd_path := strings.builder_make()
+TRACK_LEAKS :: #config(TRACK_LEAKS, true)
+LOG_FILE :: #config(LOG_FILE, "wish.log")
 
-	env_path := os.get_env("PATH")
-	dirs := strings.split(env_path, ":")
-
-	if len(dirs) == 0 {
-		fmt.eprintln(ERROR, "missing $PATH environment variable")
-		return .Error
+main :: proc() {
+	fd, _ := os.open(LOG_FILE, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0o777)
+	context.logger = log.create_file_logger(fd, opt = {.Level, .Short_File_Path, .Terminal_Color})
+	when TRACK_LEAKS {
+		track: mem.Tracking_Allocator
+		mem.tracking_allocator_init(&track, context.allocator)
+		context.allocator = mem.tracking_allocator(&track)
 	}
 
-	base: for dir in dirs {
-		fd, err := os.open(dir)
-		defer os.close(fd)
+	buf: [256]byte
+	args: []string
+	status := StatusCode.Ok
 
-		if err != os.ERROR_NONE {
-      continue
-		}
+	for status != .Exit {
+		print_prompt(status)
+		args = readline(buf[:])
+		status = execute(args)
 
-		fis: []os.File_Info
-		defer os.file_info_slice_delete(fis)
-
-		fis, _ = os.read_dir(fd, -1)
-
-		for fi in fis {
-			_, filename := filepath.split(fi.fullpath)
-			if filename == args[0] {
-				fmt.sbprint(&cmd_path, fi.fullpath)
-				break base
+		when TRACK_LEAKS {
+			for b in track.bad_free_array {
+				log.errorf("Bad free at: %v", b.location)
 			}
+
+			clear(&track.bad_free_array)
 		}
+
+		free_all(context.temp_allocator)
 	}
 
-	if strings.builder_len(cmd_path) == 0 {
-		fmt.eprintln(WARNING, "command not found:", args[0])
-		return .Error
-	}
-
-	pid, err := fork();if err != os.ERROR_NONE {
-		fmt.eprintln(ERROR, "fork:", ERROR_MSG[err])
-		return .Error
-	}
-
-	if (pid == 0) {
-		err = exec(strings.to_string(cmd_path), args[1:]);if err != os.ERROR_NONE {
-			fmt.eprintln(WARNING, "execve:", ERROR_MSG[err])
-			return .Error
+	when TRACK_LEAKS {
+		for _, value in track.allocation_map {
+			log.errorf("%v: Leaked %v bytes\n", value.location, value.size)
 		}
-		os.exit(0)
+
+		mem.tracking_allocator_destroy(&track)
+	}
+}
+
+readline :: proc(buf: []byte, allocator := context.temp_allocator) -> []string {
+	n, err := os.read(os.stdin, buf)
+	if cmd.Errno(err) != .ERROR_NONE {
+		log.error(ERROR, "os.read: ", ERROR_MSG[err])
+		return {}
 	}
 
-	wpid, _ = waitpid(pid, &status, {Wait_Option.WUNTRACED})
-
-	return wpid == pid && WIFEXITED(status) ? .Ok : .Error
+	command := cast(string)buf[:n - 1]
+	log.debugf("cmd: '{}' | buf: {}", command, buf[:n])
+	return strings.fields(command, allocator)
 }
 
 execute :: proc(args: []string) -> StatusCode {
-	if len(args) == 0 {
-		return .Usage
-	}
+	command, ok := slice.get(args, 0)
+	if !ok do return .Usage
 
-	switch args[0] {
+	switch command {
+	case "^L":
+		return cmd.launch({"clear"}) == .ERROR_NONE ? .Ok : .Error
 	case "cd":
 		return cd(args)
+	case "echo":
+		return echo(args)
+	case "type":
+		return type(args)
 	case "help":
 		return help()
 	case "exit":
-		os.exit(0)
+		return .Exit
 	case:
-		return launch(args)
-	}
-}
-
-main :: proc() {
-	buf: [256]byte
-	cmd: string
-	args: []string
-	status := StatusCode.Ok
-	cwd := os.get_current_directory()
-	stdout := os.stream_from_handle(os.stdout)
-
-	for {
-		switch status {
-		case .Ok:
-			fmt.wprint(stdout, BLUE, cwd, "\n", PROMPT, " ")
-		case .Error:
-			fmt.wprint(stdout, "", ERROR, " ")
-		case .Usage:
-			fmt.wprint(stdout, "", WARNING, " ")
-		}
-
-		n, err := os.read(os.stdin, buf[:]);if err < 0 {
-			fmt.eprintln(ERROR, "os.read: ", ERROR_MSG[err])
-			os.exit(1)
-		}
-
-		cmd = string(buf[:n])
-		args = strings.fields(cmd)
-
-		status = execute(args)
+		return cmd.launch(args) == .ERROR_NONE ? .Ok : .Error
 	}
 }
