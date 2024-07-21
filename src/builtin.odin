@@ -6,11 +6,12 @@ import "core:log"
 import "core:os"
 import "core:path/filepath"
 import "core:slice"
+import "termios"
 
-BUILTIN_CMDS := []string{"cd", "pwd", "echo", "help", "exit"}
+BUILTIN_CMDS := []string{"cd", "pwd", "type", "echo", "help", "exit", "where"}
 
 // [C]hange [D]irectory
-cd :: proc(args: []string) -> StatusCode {
+change_directory :: proc(args: []string) -> StatusCode {
 	path, ok := slice.get(args, 1)
 	log.debug(path)
 	if !ok || path == "~" {
@@ -35,29 +36,61 @@ cd :: proc(args: []string) -> StatusCode {
 	return .Ok
 }
 
-echo :: proc(args: []string) -> StatusCode {
-	echoed_str, ok := slice.get(args, 1)
-	if ok do fmt.println(echoed_str)
-	return ok ? .Ok : .Error
-}
-
-type :: proc(args: []string) -> StatusCode {
+find_command :: proc(args: []string) -> StatusCode {
 	command, ok := slice.get(args, 1)
-	if slice.contains(BUILTIN_CMDS[:], command) {
-		fmt.printfln("{} is a shell builtin", command)
-	} else {
-		path, found := cmd.find_program(command)
-		if found {
-			fmt.printfln("{} is {}", command, path)
-		} else {
-			fmt.printfln("{}: not found", command)
-		}
+	if !ok do return .Error
+
+	path, found := cmd.find_program(command)
+	if found {
+		fmt.printfln("{}", path)
+		return .Ok
 	}
 
+	fmt.printfln("{} not found", command)
+	return .Error
+}
+
+// Clear terminal screen
+clear_term :: proc() -> StatusCode {
+	fmt.fprint(os.stdout, GO_HOME)
+	fmt.fprint(os.stdout, CLEAR_FORWARD)
+	print_prompt()
+	fmt.fprint(os.stdout, SAVE_CURSOR)
+	return .Ok
+}
+
+// Expand string and display it
+echo :: proc(args: []string) -> StatusCode {
+	echoed_str, ok := slice.get(args, 1)
+	if ok {
+		fmt.fprintf(os.stdout, "{}\r\n", echoed_str)
+	}
 	return ok ? .Ok : .Error
 }
 
-pwd :: proc(args: []string) -> StatusCode {
+// Display type of command
+type_of_command :: proc(args: []string) -> StatusCode {
+	command, ok := slice.get(args, 1)
+
+	if !ok do return .Error
+
+	if slice.contains(BUILTIN_CMDS[:], command) {
+		fmt.printfln("{} is a shell builtin", command)
+		return .Ok
+	}
+
+	path, found := cmd.find_program(command)
+	if found {
+		fmt.printfln("{} is {}", command, path)
+		return .Ok
+	}
+
+	fmt.printfln("{}: not found", command)
+	return .Error
+}
+
+// [P]rint [W]orking [D]irectory
+print_working_directory :: proc(args: []string) -> StatusCode {
 	pwd := os.get_current_directory()
 	defer delete(pwd)
 	fmt.println(pwd)
@@ -65,7 +98,7 @@ pwd :: proc(args: []string) -> StatusCode {
 }
 
 // Display information about built-in commands
-help :: proc() -> StatusCode {
+show_help :: proc() -> StatusCode {
 	fmt.println("dvrd's WISH")
 	fmt.println("Type program names and arguments, and hit enter.")
 	fmt.println("The following are built in:")
@@ -77,4 +110,19 @@ help :: proc() -> StatusCode {
 	fmt.println("Use the man command for information on other programs.")
 
 	return .Ok
+}
+
+// Launch command on forked process
+launch :: proc(command: string, args: []string) -> (res: StatusCode) {
+	path, found := cmd.find_program(command)
+	if found {
+		args[0] = path
+		termios.restore()
+		res = cmd.launch(args) == .ERROR_NONE ? .Ok : .Error
+		termios.set()
+	} else {
+		fmt.printfln("command not found: {}", command)
+		res = .Error
+	}
+	return
 }

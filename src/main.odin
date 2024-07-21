@@ -1,12 +1,10 @@
 package wish
 
-import "cmd"
-import "core:fmt"
 import "core:log"
 import "core:mem"
 import "core:os"
 import "core:slice"
-import "core:strings"
+import "termios"
 
 StatusCode :: enum {
 	Ok,
@@ -19,21 +17,23 @@ TRACK_LEAKS :: #config(TRACK_LEAKS, true)
 LOG_FILE :: #config(LOG_FILE, "wish.log")
 
 main :: proc() {
-	fd, _ := os.open(LOG_FILE, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0o777)
-	context.logger = log.create_file_logger(fd, opt = {.Level, .Short_File_Path, .Terminal_Color})
 	when TRACK_LEAKS {
 		track: mem.Tracking_Allocator
 		mem.tracking_allocator_init(&track, context.allocator)
 		context.allocator = mem.tracking_allocator(&track)
 	}
 
-	buf: [256]byte
+	fd, _ := os.open(LOG_FILE, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0o777)
+	context.logger = log.create_file_logger(fd, opt = {.Level, .Short_File_Path})
+
+	termios.set()
+	defer termios.restore()
+
 	args: []string
 	status := StatusCode.Ok
 
 	for status != .Exit {
-		print_prompt(status)
-		args = readline(buf[:])
+		args = read_prompt(status)
 		status = execute(args)
 
 		when TRACK_LEAKS {
@@ -56,36 +56,29 @@ main :: proc() {
 	}
 }
 
-readline :: proc(buf: []byte, allocator := context.temp_allocator) -> []string {
-	n, err := os.read(os.stdin, buf)
-	if cmd.Errno(err) != .ERROR_NONE {
-		log.error(ERROR, "os.read: ", ERROR_MSG[err])
-		return {}
-	}
-
-	command := cast(string)buf[:n - 1]
-	log.debugf("cmd: '{}' | buf: {}", command, buf[:n])
-	return strings.fields(command, allocator)
-}
-
 execute :: proc(args: []string) -> StatusCode {
+	log.debug("executing", args)
 	command, ok := slice.get(args, 0)
 	if !ok do return .Usage
 
 	switch command {
-	case "^L":
-		return cmd.launch({"clear"}) == .ERROR_NONE ? .Ok : .Error
 	case "cd":
-		return cd(args)
+		return change_directory(args)
+	case "pwd":
+		return print_working_directory(args)
+	case "clear":
+		return clear_term()
 	case "echo":
 		return echo(args)
 	case "type":
-		return type(args)
+		return type_of_command(args)
+	case "where":
+		return find_command(args)
 	case "help":
-		return help()
+		return show_help()
 	case "exit":
 		return .Exit
 	case:
-		return cmd.launch(args) == .ERROR_NONE ? .Ok : .Error
+		return launch(command, args)
 	}
 }
