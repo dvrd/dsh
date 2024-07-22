@@ -114,6 +114,14 @@ show_help :: proc() -> StatusCode {
 
 // Launch command on forked process
 launch :: proc(command: string, args: []string) -> (res: StatusCode) {
+
+	if command[:2] == "./" {
+		termios.restore()
+		res = cmd.launch(args) == .ERROR_NONE ? .Ok : .Error
+		termios.set()
+		return
+	}
+
 	path, found := cmd.find_program(command)
 	if found {
 		args[0] = path
