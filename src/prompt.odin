@@ -6,11 +6,13 @@ import "core:log"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "git"
 
 RED :: ansi.CSI + ansi.FG_RED + ansi.SGR
 GREEN :: ansi.CSI + ansi.FG_GREEN + ansi.SGR
 BLUE :: ansi.CSI + ansi.FG_BLUE + ansi.SGR
 YELLOW :: ansi.CSI + ansi.FG_YELLOW + ansi.SGR
+MAGENTA :: ansi.CSI + ansi.FG_MAGENTA + ansi.SGR
 
 GO_HOME :: ansi.CSI + ansi.CUP
 CLEAR_LINE :: ansi.CSI + "2" + ansi.EL
@@ -25,9 +27,13 @@ ERROR :: RED + XCROSS + RESET
 WARNING :: YELLOW + ALERT + RESET
 
 Color :: [3]byte
-colorize :: proc(str: string, color: Color) -> string {
+rgb :: proc(r, g, b: byte) -> Color {
+	return {r, g, b}
+}
+
+colorize :: proc(str: string, color: Color, allocator := context.temp_allocator) -> string {
 	color := fmt.tprintf("\x1B[38;2;%d;%d;%dm", color.r, color.g, color.b)
-	return strings.concatenate({color, str, RESET})
+	return strings.concatenate({color, str, RESET}, allocator)
 }
 
 clear_input :: proc() {
@@ -36,19 +42,27 @@ clear_input :: proc() {
 	fmt.fprint(os.stdout, CLEAR_FORWARD)
 }
 
+
 print_prompt :: proc(status := StatusCode.Ok) {
 	pwd := os.get_current_directory()
 	defer delete(pwd)
+
 	pwd_short_stem := filepath.short_stem(pwd)
 	stdout := os.stream_from_handle(os.stdout)
+	fmt.wprintf(stdout, "\r{}{}", colorize(pwd_short_stem, rgb(24, 152, 129)), RESET)
+
+	current_git_branch, is_git_init := git.branch()
+	if is_git_init {
+		fmt.wprintf(stdout, " on {}{}{}", MAGENTA, GIT, current_git_branch)
+	}
 
 	#partial switch status {
 	case .Ok:
-		fmt.wprintf(stdout, "\r{}{}\n\r{} ", BLUE, pwd_short_stem, GREEN + ARROW_RIGHT + RESET)
+		fmt.wprintf(stdout, "\n\r{} ", GREEN + ARROW_RIGHT + RESET)
 	case .Error:
-		fmt.wprintf(stdout, "\r{}{}\n\r{} ", BLUE, pwd_short_stem, RED + CHEVRON_RIGHT + RESET)
+		fmt.wprintf(stdout, "\n\r{} ", RED + ARROW_RIGHT + RESET)
 	case .Usage:
-		fmt.wprintf(stdout, "\r{}{}\n\r{} ", BLUE, pwd_short_stem, YELLOW + CHEVRON_RIGHT + RESET)
+		fmt.wprintf(stdout, "\n\r{} ", YELLOW + ARROW_RIGHT + RESET)
 	}
 }
 

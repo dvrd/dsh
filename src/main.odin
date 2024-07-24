@@ -23,8 +23,11 @@ main :: proc() {
 		context.allocator = mem.tracking_allocator(&track)
 	}
 
-	fd, _ := os.open(LOG_FILE, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0o777)
-	context.logger = log.create_file_logger(fd, opt = {.Level, .Short_File_Path})
+	fd, errno := os.open(LOG_FILE, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0o777)
+	if errno == os.ERROR_NONE {
+		defer os.close(fd)
+		context.logger = log.create_file_logger(fd, opt = {.Level, .Short_File_Path})
+	}
 
 	termios.set()
 	defer termios.restore()
@@ -35,6 +38,7 @@ main :: proc() {
 	for status != .Exit {
 		args = read_prompt(status)
 		status = execute(args)
+		os.write(os.stdout, {'\n'})
 
 		when TRACK_LEAKS {
 			for b in track.bad_free_array {
