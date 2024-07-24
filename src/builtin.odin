@@ -1,4 +1,4 @@
-package wish
+package main
 
 import "cmd"
 import "core:fmt"

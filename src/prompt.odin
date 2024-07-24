@@ -1,4 +1,4 @@
-package wish
+package main
 
 import "core:encoding/ansi"
 import "core:fmt"

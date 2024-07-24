@@ -1,4 +1,4 @@
-package wish
+package main
 
 AWS :: "  "
 BUF :: " "

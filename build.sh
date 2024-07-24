@@ -1,11 +1,11 @@
 #!/bin/bash
 
-echo "Building wish..."
-odin build src -out:wish -o:speed
+echo "Building dsh..."
+odin build src -out:dsh -o:speed
 
 if [[ $? -eq 0 ]]; then
     echo "Build succeeded"
-    execute ./wish
+    execute ./dsh
 else
     echo "Build failed"
 fi

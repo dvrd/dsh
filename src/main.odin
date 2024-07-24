@@ -1,4 +1,4 @@
-package wish
+package main
 
 import "core:log"
 import "core:mem"
