@@ -1,4 +1,5 @@
 /target
 dsh.log
+dsh.hist
 *.bin
 dsh

@@ -6,6 +6,7 @@ import "core:log"
 import "core:os"
 import "core:path/filepath"
 import "core:slice"
+import "history"
 import "termios"
 
 BUILTIN_CMDS := []string{"cd", "pwd", "type", "echo", "help", "exit", "where"}
@@ -99,7 +100,7 @@ print_working_directory :: proc(args: []string) -> StatusCode {
 
 // Display information about built-in commands
 show_help :: proc() -> StatusCode {
-	fmt.println("dvrd's WISH")
+	fmt.println(colorize("dsh", rgb(120, 30, 50)))
 	fmt.println("Type program names and arguments, and hit enter.")
 	fmt.println("The following are built in:")
 
@@ -122,9 +123,8 @@ launch :: proc(command: string, args: []string) -> (res: StatusCode) {
 		return
 	}
 
-	path, found := cmd.find_program(command)
+	_, found := cmd.find_program(command)
 	if found {
-		args[0] = path
 		termios.restore()
 		res = cmd.launch(args) == .ERROR_NONE ? .Ok : .Error
 		termios.set()
@@ -133,4 +133,11 @@ launch :: proc(command: string, args: []string) -> (res: StatusCode) {
 		res = .Error
 	}
 	return
+}
+
+print_history :: proc() -> StatusCode {
+	for entry, idx in history.hist.data[:min(len(history.hist.data), 15)] {
+		fmt.fprintf(os.stdout, "{} {}\r\n", idx, entry)
+	}
+	return .Ok
 }

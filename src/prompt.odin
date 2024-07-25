@@ -7,6 +7,7 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "git"
+import "history"
 
 RED :: ansi.CSI + ansi.FG_RED + ansi.SGR
 GREEN :: ansi.CSI + ansi.FG_GREEN + ansi.SGR
@@ -66,16 +67,33 @@ print_prompt :: proc(status := StatusCode.Ok) {
 	}
 }
 
+handle_esc_seq :: proc(buf: []byte, buf_len: ^int) {
+	seq: [2]byte
+	log.debug("READING ESC SEQ")
+	os.read(os.stdin, seq[:])
+	log.debugf("SEQ: %v %c%c", seq, seq[0], seq[1])
+	switch seq[1] {
+	case 'A':
+		history.travel_back()
+		history.load_entry(buf, buf_len)
+	case 'B':
+		history.travel_forward()
+		history.load_entry(buf, buf_len)
+	case 'C':
+		log.debug("RIGHT CLICKED")
+	case 'D':
+		log.debug("LEFT CLICKED")
+	}
+}
+
 read_prompt :: proc(status: StatusCode, allocator := context.temp_allocator) -> (args: []string) {
 	print_prompt(status)
-
-	// termios.set()
-	// defer termios.restore()
 
 	@(static)
 	buf: [512]byte
 	len := 0
 	bits: int
+	char: byte
 	err: os.Errno
 
 	fmt.fprint(os.stdout, SAVE_CURSOR)
@@ -88,12 +106,17 @@ read_prompt :: proc(status: StatusCode, allocator := context.temp_allocator) -> 
 		if bits < 1 do continue loop
 		clear_input()
 
-		log.debug(buf[:len])
+		char = buf[len]
+		log.debug("LEN:", len)
+		log.debugf("NEXT CHAR: (%#x) %c", char, char)
 
-		switch buf[len] {
+		switch char {
+		case '\t':
+		case '\e':
+			handle_esc_seq(buf[:], &len)
+			os.write(os.stdout, buf[:len])
 		case 0xC:
 			clear_term()
-			os.write(os.stdout, buf[:len])
 		case 0xD:
 			os.write(os.stdout, buf[:len])
 			os.write(os.stdout, {'\r', '\n'})
@@ -105,6 +128,10 @@ read_prompt :: proc(status: StatusCode, allocator := context.temp_allocator) -> 
 			len = min(511, len + 1)
 			os.write(os.stdout, buf[:len])
 		}
+
+		log.debug("CURRENT BYTES:", buf[:len])
+		log.debug("CURRENT INPUT:", cast(string)buf[:len])
+		log.debug("----------------------------")
 	}
 
 	args = strings.fields(cast(string)buf[:len], allocator)

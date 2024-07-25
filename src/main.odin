@@ -1,10 +1,13 @@
 package main
 
+import "core:fmt"
 import "core:log"
+import "core:strings"
 import "core:mem"
 import "core:os"
 import "core:slice"
 import "termios"
+import "history"
 
 StatusCode :: enum {
 	Ok,
@@ -14,7 +17,10 @@ StatusCode :: enum {
 }
 
 TRACK_LEAKS :: #config(TRACK_LEAKS, true)
-LOG_FILE :: #config(LOG_FILE, "wish.log")
+LOG_FILE :: #config(LOG_FILE, "dsh.log")
+HIST_FILE :: #config(HIST_FILE, "dsh.hist")
+
+LOG: os.Handle
 
 main :: proc() {
 	when TRACK_LEAKS {
@@ -23,11 +29,15 @@ main :: proc() {
 		context.allocator = mem.tracking_allocator(&track)
 	}
 
-	fd, errno := os.open(LOG_FILE, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0o777)
-	if errno == os.ERROR_NONE {
-		defer os.close(fd)
-		context.logger = log.create_file_logger(fd, opt = {.Level, .Short_File_Path})
-	}
+	LOG, _ = os.open(LOG_FILE, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0o777)
+	defer os.close(LOG)
+	context.logger = log.create_file_logger(LOG, opt = {.Level, .Short_File_Path, .Line})
+	defer free(context.logger.data)
+
+	history.init(HIST_FILE)
+	defer history.close()
+
+	fmt.println("\nWelcome to dsh-1.0")
 
 	termios.set()
 	defer termios.restore()
@@ -50,39 +60,36 @@ main :: proc() {
 
 		free_all(context.temp_allocator)
 	}
-
-	when TRACK_LEAKS {
-		for _, value in track.allocation_map {
-			log.errorf("%v: Leaked %v bytes\n", value.location, value.size)
-		}
-
-		mem.tracking_allocator_destroy(&track)
-	}
 }
 
-execute :: proc(args: []string) -> StatusCode {
+execute :: proc(args: []string) -> (res: StatusCode) {
 	log.debug("executing", args)
 	command, ok := slice.get(args, 0)
 	if !ok do return .Usage
 
 	switch command {
 	case "cd":
-		return change_directory(args)
+		res = change_directory(args)
 	case "pwd":
-		return print_working_directory(args)
+		res = print_working_directory(args)
 	case "clear":
-		return clear_term()
+		res = clear_term()
 	case "echo":
-		return echo(args)
+		res = echo(args)
 	case "type":
-		return type_of_command(args)
+		res = type_of_command(args)
 	case "where":
-		return find_command(args)
+		res = find_command(args)
 	case "help":
-		return show_help()
+		res = show_help()
 	case "exit":
-		return .Exit
+		res = .Exit
+	case "history":
+		res = print_history()
 	case:
-		return launch(command, args)
+		res = launch(command, args)
 	}
+
+	history.add_entry(strings.join(args, " "))
+	return
 }

@@ -27,10 +27,8 @@ branch :: proc() -> (name: string, ok: bool) {
 
 	data: []byte
 	data, ok = read_head_file(pwd)
-	log.debug("HELLO", data, ok, '/')
-	if !ok || is_head_detached(data) {
-		return "", false
-	}
+
+	if !ok || is_head_detached(data) do return "", false
 
 	name = cast(string)data[16:len(data) - 1]
 	return
